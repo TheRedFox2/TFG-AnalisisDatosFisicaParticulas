@@ -1,0 +1,6 @@
+nopflash
+meanhitrisetime
+maxhitamp
+maxhitarea
+maxhitwidth
+meanhitamp

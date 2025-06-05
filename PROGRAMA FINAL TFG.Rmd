@@ -1,0 +1,872 @@
+---
+title: "FINAL TFG"
+author: "Alvaro Muñoz RUiz"
+date: "2025-05-22"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+  pdf_document:
+    toc: true
+    fig_width: 6
+    fig_height: 4
+  word_document:
+    toc: true
+---
+# Cargo librerías y datos
+```{r, message = FALSE, results = 'hide', warning=FALSE}
+library(summarytools)
+library(dplyr)
+library(ggplot2)
+library(ggpubr)
+library(tidyverse)
+library(cluster)
+library(foreign)
+library(readxl)
+library(archdata)
+library(psych)
+library(factoextra)
+library(scatterplot3d)
+library(gridExtra)
+library(ggrepel)
+library(pROC)
+library(ggdendro)
+library(BBmisc)
+library(reshape2)
+library(MVN)
+library(e1071) 
+library(caTools) 
+library(class) 
+library(caret)
+library(biotools)
+library(MASS)
+library(aod)
+library(corrplot)
+```
+
+```{r, message = FALSE, results = 'hide', warning=FALSE}
+pion<-read.csv('data_pion.csv')
+muon<-read.csv('data_muon.csv')
+datos<-read.csv("datos_mezclados.csv")
+muon_modif<-read.csv("muon_modif.csv")
+pion_modif<-read.csv("pion_modif.csv")
+variables<-scan("variables.txt", what="", sep="\n")
+#El de datos y los train y test los tengo que cargar mas tarde
+#datos <- datos[,c("EventID","PDGcode",variables)]
+train<-datos[datos$EventID>=1 & datos$EventID<=14,]
+train <- train[,c("EventID","PDGcode",variables)]
+# test<-datos[datos$EventID>14,]
+```
+# Primero toca ver el análisis exploratorio
+## Histogramas y estudio de las mejores variables
+```{r,out.width = "3.5in"}
+variab <- c("nopflash","flash_time", "maxhitamp","meanhitamp", "flashPE","maxhitarea","meanhitarea","maxhitwidth","meanhitwidth","maxhitrisetime","meanhitrisetime")
+
+for (var in variab){
+  n_bins <- ceiling(log2(length(datos[[var]])) + 1)
+  d1<-ggplot(datos, aes(x=as.numeric(get(var)),fill=PDGcode, colour=PDGcode))+geom_histogram(bins=n_bins,alpha=0.5,position = "dodge")+labs(title = paste(var,"según pion o muon"),x=var ,fill = "Tipo de particula")+guides(colour = "none")
+print(d1)
+}
+#Chi-2 test
+categ<-unique(datos$PDGcode)
+for(var in variab){
+  n_bins <- ceiling(log2(length(datos[[var]])) + 1)
+p <- ggplot(datos, aes(x = .data[[var]], fill = PDGcode)) +
+    geom_histogram(bins=n_bins,alpha = 0.5, position = "dodge")
+  hist_data <- ggplot_build(p)$data[[1]]
+  freq1 <- hist_data[hist_data$group == 1, "count"]  
+  freq2 <- hist_data[hist_data$group == 2, "count"] 
+  cat("Variable",var,"\n")
+   tabla <- rbind(freq1, freq2)
+  rownames(tabla) <- c(as.character("pion"), as.character("muon"))
+  colnames(tabla) <- paste("Bin", 1:ncol(tabla), sep = "_")
+  
+  print(tabla)
+    chi_result <- chisq.test(tabla)
+    print(chi_result)
+
+}
+# ks test
+for(var in variab){
+  n_bins <- ceiling(log2(length(datos[[var]])) + 1)
+p <- ggplot(datos, aes(x = .data[[var]], fill = PDGcode)) +
+    geom_histogram(bins=n_bins,alpha = 0.5, position = "dodge")
+  hist_data <- ggplot_build(p)$data[[1]]
+  freq1 <- hist_data[hist_data$group == 1, "count"]  
+  freq2 <- hist_data[hist_data$group == 2, "count"] 
+  cat("Variable",var,"\n")
+    kstest <- ks.test(freq1,freq2)
+    print(kstest)
+}
+#Y ahora loglik de una poisson
+for(var in variab){
+  n_bins <- ceiling(log2(length(datos[[var]])) + 1)
+  p <- ggplot(datos, aes(x = .data[[var]], fill = PDGcode)) +
+    geom_histogram(bins=n_bins, alpha = 0.5, position = "dodge") 
+  hist_data <- ggplot_build(p)$data[[1]]
+  freq1 <- hist_data[hist_data$group == 1, "count"]  
+  freq2 <- hist_data[hist_data$group == 2, "count"] 
+  # Crear un dataframe combinado con los datos de ambos grupos
+  group <- c(rep(1, length(freq1)), rep(2, length(freq2)))
+  counts <- c(freq1, freq2)
+  data <- data.frame(group = factor(group), counts = counts)
+  data <- data[data$counts > 0, ]
+  # Ajustar modelo Poisson completo (tasas diferentes por grupo)
+  modelo_completo <- glm(counts ~ group, family = poisson(link = "log"), data = data)
+  
+  # Ajustar modelo Poisson reducido (una sola tasa para ambos grupos)
+  modelo_reducido <- glm(counts ~ 1, family = poisson, data = data)
+  
+  # Calcular el LRT
+  LRT_stat <- 2 * (logLik(modelo_completo)[1] - logLik(modelo_reducido)[1])
+  p_value <- pchisq(LRT_stat, df = 1, lower.tail = FALSE)
+  
+  cat("Variable:", var, "\n")
+  cat("Log-Likelihood Completo:", logLik(modelo_completo), "\n")
+  cat("Log-Likelihood Reducido:", logLik(modelo_reducido), "\n")
+  cat("LRT Statistic:", LRT_stat, "\n")
+  cat("P-Valor:", p_value, "\n")
+  cat("\n")
+}
+
+#Ahora la diferencia de medias normalizada
+
+eta<-function(data1,data2) {
+  mu1<-mean(data1)
+mu2<-mean(data2)
+sd1<-sd(data1)
+sd2<-sd(data2)
+  
+eta<-abs(mu2-mu1)/(sqrt(sd2^2+sd1^2))
+  eta
+}
+
+eta(pion[,"maxhitamp"],muon[,"maxhitamp"])
+
+vari <- colnames(pion)[-c(1,2)]
+eta_valor=data.frame()
+i=1
+for(var in vari){
+  eta_valor[i,1]<-paste(var)
+  eta_valor[i,2]<-eta(pion[[var]],muon[[var]])
+  i=i+1
+}
+colnames(eta_valor)<-c("Nombre variable","Eta")
+eta_valor[order(eta_valor$Eta,decreasing=TRUE),]
+```
+
+
+Ahora los boxplots
+## Boxplots
+```{r}
+vari<-eta_valor[,1]
+for (var in vari){
+  cat("\n\nPara la variable llamada:", var, "\n")
+  d1<-ggplot(pion, aes(x=.data[[var]]))+geom_boxplot(outlier.colour="red", outlier.shape=1,outlier.size=2)+coord_flip()+labs(x=var,title =paste(var,"según pion"))
+  d2<-ggplot(muon, aes(x=.data[[var]]))+geom_boxplot(outlier.colour="red", outlier.shape=1,outlier.size=2)+coord_flip()+labs(x=var,title =paste(var,"según muon" ))
+
+g<-ggarrange(d1,d2,ncol = 2,nrow = 1)
+print(g)
+}
+```
+
+Sigo con el analisis exploratorio ahora con las relaciones
+
+## Linealidad y correlaciones
+```{r}
+pion2<-ggplot(pion,aes(x=maxhitPE,y=maxhitarea))+geom_point(size=3,color='blue')+
+labs(title = "Relacion entre maximo de fotones y maxima area(pion)",x="Max fot",y="Max area")+scale_y_continuous(labels = function(x) format(x, scientific = TRUE))
+muon2<-ggplot(muon,aes(x=maxhitPE,y=maxhitarea))+geom_point(size=3,color='red')+
+labs(title = "Relacion entre maximo de fotones y maxima area(muon)",x="Max fot",y="Max area")+scale_y_continuous(labels = function(x) format(x, scientific = TRUE))
+#Me interesa hacerle una regresion lineal porque es evidentemente lineal
+pion_lm<-lm(maxhitarea ~ maxhitPE, data = pion);pion_lm
+muon_lm<-lm(maxhitarea ~ maxhitPE, data = muon);muon_lm
+#Ahora los dibujamos con la linea
+pion2<-pion2 + geom_smooth(method='lm',color='violet',se= TRUE,size=0.8) +coord_cartesian(ylim=c(0,1.25*10^6))
+muon2<-muon2 + geom_smooth(method='lm',color='violet',se= TRUE,size=0.8)+coord_cartesian(ylim=c(0,1.25*10^6))
+ggarrange(pion2,muon2)
+
+#Ahora histogramas de FlashPE
+pion5<-ggplot(pion,aes(x=flashPE))+geom_histogram(bins=30,alpha=0.5,fill='red')+
+labs(title = "Nº of flashPE for pions",x="Nº flashPE",y=" total")+scale_y_continuous(limits= c(0,700))
+muon5<-ggplot(muon,aes(x=flashPE))+geom_histogram(alpha=0.5,fill='blue')+
+labs(title = "Nº of opFlash for muons",x="Nº flashPE",y=" total")+scale_y_continuous(limits= c(0,700))
+ggarrange(pion5,muon5)
+
+#Por ultimo la matriz de correlacion
+particula <- c("pion","muon")
+for(p in particula){
+corrmatrix<-cor(datos[datos$PDGcode==p,-c(1,2)])
+print(corrmatrix)
+}
+
+#Matriz de correlación
+cor_matrix <- cor(train[,-c(1,2)])  # Excluye la variable objetivo
+corrplot(cor_matrix, method = "color", tl.cex = 0.7)
+
+
+```
+
+
+
+
+Esta es una de las cosas de la que quiero hablar al principio.
+
+## Scatterplot
+Ahora SÍ meto los data frame nuevos
+```{r}
+variables<-scan("variables.txt", what="", sep="\n")
+datos <- datos[,c("EventID","PDGcode",variables)]
+train<-datos[datos$EventID>=1 & datos$EventID<=14,]
+test<-datos[datos$EventID>14,]
+#Scatterplot
+datos <- read.csv("datos_mezclados.csv")
+colores <- c(rgb(248, 118, 109, maxColorValue = 255),rgb(97, 156, 255, maxColorValue = 255)) 
+datos$color <- colores[as.numeric(factor(datos$PDGcode))]
+par(xpd = TRUE)
+pairs(datos[, c(variables,"maxhitPE")], col = datos$color, pch = 1,cex = 0.8)
+legend("top", inset = -0.1,legend = c("Muon", "Pion"),  fill = colores, pch = 1,horiz = TRUE,title = "PDGcode",cex=0.5)
+datos <- datos[, !(names(datos) %in% "color")]
+```
+
+# ANALISIS DE CORTES
+```{r}
+#Como los piones suelen tener mas nopflash, asi clasificamos
+An_corte_nopflash<-function(train,fila_test,valor_corte){
+ if(valor_corte<=0){
+   print("Valor de corte no valido")
+   break
+ }
+ resultado <- NULL
+ 
+if (fila_test$nopflash>=valor_corte) {
+    resultado <- "pion"
+} else {
+    resultado <- "muon"
+}
+return(resultado)
+
+} 
+
+
+#los piones suelen tener mas
+An_corte_meanhitrisetime<-function(train,fila_test,valor_corte){
+ if(valor_corte<=0){
+   print("Valor de corte no valido")
+   break
+ }
+ resultado <- NULL
+ 
+if (fila_test$meanhitrisetime>=valor_corte) {
+    resultado <- "pion"
+} else {
+    resultado <- "muon"
+}
+return(resultado)
+
+} 
+
+#los piones tienen menos UNA VEZ LLEGAMOS AL TERCER CORTE, antes de los cortes, tienen mas.
+An_corte_maxhitamp<-function(train,fila_test,valor_corte){
+ if(valor_corte<0){
+   print("Valor de corte no valido")
+   break
+ }
+ resultado <- NULL
+ 
+if (fila_test$maxhitamp<=valor_corte) {
+    resultado <- "pion"
+} else {
+    resultado <- "muon"
+}
+return(resultado)
+} 
+```
+
+En el original hago un estudio del mejor corte, y este es nopflash=2
+```{r}
+imax<-nrow(test)
+
+predicciones <- character(nrow(test))
+
+ordenado<-data.frame()
+for(i in 1:imax){
+predicciones[i]<-An_corte_nopflash(train,test[i,], 2)
+#setTxtProgressBar(pb, i)
+}
+
+matriz_confusion <- table(Prediccion = predicciones, Real = test$PDGcode)
+#La reordeno porque es mas logico buscar piones, ya que son mas dificiles de hallar.
+matriz_confusion <- matriz_confusion[match(c("pion", "muon"), rownames(matriz_confusion)),
+                                      match(c("pion", "muon"), colnames(matriz_confusion))]
+ cat("Para el valor de corte:",2," la matriz de confusion es tal que \n")
+print(matriz_confusion)
+cat("\n")
+cat("Y sus proporciones son: \n")
+print(round(prop.table(matriz_confusion)*100))
+
+ef_pion<-(matriz_confusion["pion","pion"])/(colSums(matriz_confusion)["pion"])*100
+pur_pion<-(matriz_confusion["pion","pion"])/(rowSums(matriz_confusion)["pion"])*100
+cat("La eficiencia del pion es:", ef_pion, "%\n Y la pureza del pion:", pur_pion,"%\n")
+
+
+# Crear un índice lógico para identificar las filas donde los valores son diferentes
+diferencias <- test$PDGcode != predicciones
+
+# Filtrar el data frame original usando el índice lógico
+test_corte1 <- test[diferencias, ]
+
+# Y ahora el corte segun meanhitrisetime donde el mejor era en 0.00425
+imax<-nrow(test_corte1)
+# Initiate the bar
+#pb <- txtProgressBar(min = 0, max = imax, style = 3)
+predicciones <- character(nrow(test_corte1))
+for(i in 1:imax){
+predicciones[i]<-An_corte_meanhitrisetime(train,test_corte1[i,], 0.00425)
+#setTxtProgressBar(pb, i)
+}
+
+matriz_confusion <- table(Prediccion = predicciones, Real = test_corte1$PDGcode)
+#La reordeno porque es mas logico buscar piones, ya que son mas dificiles de hallar.
+matriz_confusion <- matriz_confusion[match(c("pion", "muon"), rownames(matriz_confusion)),
+                                      match(c("pion", "muon"), colnames(matriz_confusion))]
+ cat("Para el valor de corte:",2," la matriz de confusion es tal que \n")
+print(matriz_confusion)
+cat("\n")
+cat("Y sus proporciones son: \n")
+print(round(prop.table(matriz_confusion)*100))
+
+ef_pion<-(matriz_confusion["pion","pion"])/(colSums(matriz_confusion)["pion"])*100
+pur_pion<-(matriz_confusion["pion","pion"])/(rowSums(matriz_confusion)["pion"])*100
+cat("La eficiencia del pion es:", ef_pion, "%\n Y la pureza del pion:", pur_pion,"%\n")
+
+
+```
+
+El analisis de cortes es horrible no merece la pena apenas ni nombrarlo.
+
+# Comprobación multivariante
+Primero de todo, tengo un problema, y es que no se hasta que punto merece la pena o no normalizar los datos. Por un lado, es necesario para la comprobación de la normalidad, asi que en esta sección lo haré, pero por otro, nos dificulta la interpretación real de las variables obtenidas en los modelos
+```{r}
+datos<-datos[,c("EventID","PDGcode",variables)]
+normalizados<-datos
+for(var in variables){
+normalizados[[var]]<-normalize(
+  normalizados[[var]],
+  method = "range",
+  range = c(-1, 1),
+  margin = 1L,
+  on.constant = "quiet" )
+}
+```
+Hacemmos comprobación gráfica de un seguimiento normal univariante de cada variable, primero para pion
+
+```{r}
+par(mfcol = c(2, 3))
+for (k in 3:8) {
+j0 <- names(datos)[k]
+x0 <- seq(min(datos[, k]), max(datos[, k]), le = 50)
+for (i in 1:2) {
+i0 <- levels(as.factor(datos$PDGcode))[i]
+x <- datos[datos$PDGcode == i0, j0]
+hist(x, proba = T, col = grey(0.8), main = paste("PDGcode", i0), xlab = j0)
+lines(x0, dnorm(x0, mean(x), sd(x)), col = "blue", lwd = 2)
+}
+}
+
+#Ahora los qplot
+par(mfrow=c(2,3))
+for (k in 3:8) {
+j0 <- names(datos)[k]
+x0 <- seq(min(datos[, k]), max(datos[, k]), le = 50)
+for (i in 1:2) {
+i0 <- levels(as.factor(datos$PDGcode))[i]
+x <- datos[datos$PDGcode == i0, j0]
+qqnorm(x, main = paste("PDGcode", i0, j0), pch = 19, col = i + 1)
+qqline(x)
+}
+}
+#Finalmente el test de shapiro-wilks
+datos_tidy <- melt(datos, value.name = "value")
+shapiro_p <- aggregate(value ~ PDGcode + variable, data = datos_tidy,
+          FUN = function(x){shapiro.test(x)$p.value})
+shapiro_p[,shapiro_p$value>0.05]
+
+```
+Según las gráficas vemos que algunas si pueden seguir graficas normales univariantes y otras casi que no. Como además algunos siguen lineas rectas en los qplot, podemos afirmar que, aquellos que lo hacen, siguen una distribución normal. Sin embargo, tras hacer el test de Shapiro-Wilks, vemos que en ninguna linea el test de shapiro me devuelve un valor mayor a 0.05, por lo tanto ninguna de nuestras variables sigue segun este test una normal univariante.
+
+Seguimos con el test de Royston Y el de Henze-Zikler
+```{r}
+
+royston_test <- mvn(data = pion[c(1:2000),c("nopflash","maxhitamp","meanhitrisetime","maxhitarea","maxhitwidth","meanhitamp")], mvnTest = "royston", multivariatePlot = "qq")
+print("Comenzamos viendo el de Royston")
+royston_test$multivariateNormality
+
+print("\n\n Y ahora el de HZ")
+hz_test <- mvn(data = datos[,-c(1,2,3)], mvnTest = "hz")
+hz_test$multivariateNormality
+
+
+print(" Voy a probar el de mardia")
+
+set.seed(123) # Para reproducibilidad
+sample_data <- datos[,-c(1,2,3)]
+mardia_test <- mvn(data = sample_data, mvnTest = "mardia")
+mardia_test$multivariateNormality
+
+```
+Incluso normalizando sale igual, asi que no, no siguen una MVN.
+Finalmente, comprobamos la homogeneidad de la varianza, ya que a pesar de todo, si hacemos un DA cuadratico este es robusto ante estas situacinoes
+
+```{r}
+boxM(data = datos[, 3:8], grouping = datos[, 2])
+```
+Como el p-value sale practicamente 0, es menor de 0.001 y por ende rechazamos la hipotesis nula, por lo cual aceptamos heterogeneidad de varianza.
+
+# K Nearest Neighbors
+De nuevo, hemos de normalizar para poder estudiar el KNN
+```{r}
+datos<-datos[,c("EventID","PDGcode",variables)]
+normalizados<-datos
+for(var in variables){
+normalizados[[var]]<-normalize(
+  normalizados[[var]],
+  method = "range",
+  range = c(-1, 1),
+  margin = 1L,
+  on.constant = "quiet" )
+}
+#A diferencia de lo anterior hecho, ahora train y test los tengo que tomar del df normalizado
+train_norm<-normalizados[normalizados$EventID>=1 & normalizados$EventID<=14,]
+test_norm<-normalizados[normalizados$EventID>14,]
+train_norm$PDGcode<-as.factor(train_norm$PDGcode)
+test_norm$PDGcode<-as.factor(test_norm$PDGcode)
+#Voy a quedarme solo con las 4 mejores variables, ya que el resultado mejora al no tener sobredimensionalidad
+train_norm<-train_norm[,c(1:6)]
+test_norm<-test_norm[,c(1:6)]
+
+```
+
+Tras estudiar el mejor valor de K con un código extenso y pesado, se llega a la conclusión que el mejor es k=21
+```{r}
+ clasificador_knn <- train(PDGcode ~ .,data =train_norm[,-c(1)],method = "knn", trControl = trainControl(method = "cv", number = 10), tuneGrid = expand.grid(k = 21), prob = TRUE,preProcess = NULL )
+prediccion <- predict(clasificador_knn, test_norm)
+#A continuacion lo evidente: la matriz de confusion
+mc<- confusionMatrix(factor(prediccion) , factor(test_norm$PDGcode))
+mc$table
+cat("Y ahora las proporciones  \n")
+round(prop.table(mc$table)*100,2)
+mc$byClass
+paste0("Eficiencia x Pureza de: ", mc$byClass["Sensitivity"]*mc$byClass["Specificity"])
+```
+
+Por ultimo, la curva ROC del KNN
+Curva ROC knn
+```{r}
+prob_knn <- predict(clasificador_knn, test_norm, type = "prob")
+roc_curve <- roc(response = test_norm$PDGcode, predictor =prob_knn$pion, levels = levels(test_norm$PDGcode))
+auc_value <- auc(roc_curve)
+print(paste("AUC:", auc_value))
+ggplot(data = data.frame(TPR = roc_curve$sensitivities, 
+                         FPR = 1 - roc_curve$specificities), 
+       aes(x = FPR, y = TPR)) +
+  geom_line(color = "blue", size = 1) +
+  geom_abline(linetype = "dashed", color = "red") + # Línea de referencia diagonal
+  labs(title = "ROC Curve - K Nearest Neighbor",
+       x = "False Positive Rate (1 - Specificity)",
+       y = "True Positive Rate (Sensitivity)") +
+  theme_minimal()+
+   annotate("text", x = 0.8, y = 0.2, label = paste0("AUC = ",round(auc_value,4)), color = "blue", vjust = 1.5) 
+
+
+```
+
+# MODELOS QDA, LOGIT Y TODO LO QUE CONLLEVAN
+
+Primero cargo de nuevo todo para que no haya errores, y además, voy a comentar la normalización porque no aporta nada y nos perjudica a la hora de interpretar los resultados.
+```{r}
+#En este chunk, escojo las variables, normalizo mis datos para tenerlo todo tipificado y escalado, y creo los data frame de training y de test sobre los que construir el modelo en un 70%-30%, por ello escojo en train los de eventid menor de 14 y en test los de mayor.
+datos_variables <- c("EventID","PDGcode",variables)
+datos <- datos[,datos_variables]
+
+ normalizados<-datos
+# for(var in variables){
+# normalizados[[var]]<-normalize(
+#   normalizados[[var]],
+#   method = "range",
+#   range = c(-1, 1),
+#   margin = 1L,
+#   on.constant = "quiet" )
+# }
+
+#A diferencia de lo anterior hecho, ahora train y test los tengo que tomar del df normalizado
+train<-normalizados[normalizados$EventID>=1 & normalizados$EventID<=14,]
+test<-normalizados[normalizados$EventID>14,]
+train$PDGcode<-as.factor(train$PDGcode)
+test$PDGcode<-as.factor(test$PDGcode)
+#Reordeno el factor porque así me prioriza el pion, que es el que nos interesa clasificar con mayor interes
+train$PDGcode <- factor(train$PDGcode, levels = c("pion", "muon"))
+test$PDGcode <- factor(test$PDGcode, levels = c("pion", "muon"))
+```
+
+```{r}
+#Quitando maxhitwidth me da mejores resultados
+model_qda <- qda(PDGcode ~ ., data = train[,-c(1,7)])
+
+prediccion_qda <- predict(model_qda, test)
+
+prediccion_qda_mod <- ifelse(prediccion_qda$posterior[, "muon"] >= 0.5, "muon", "pion")
+
+# Convertir a factor con los niveles correctos
+prediccion_qda_mod <- factor(prediccion_qda_mod, levels = levels(test$PDGcode))
+
+# Matriz de confusión
+(mat_confusion <- confusionMatrix(prediccion_qda_mod, test$PDGcode))
+prop.table(mat_confusion$table)*100
+mat_confusion$byClass
+paste0("Eficiencia x Pureza de: ", mat_confusion$byClass["Sensitivity"]*mat_confusion$byClass["Specificity"])
+
+# Y la curva ROC
+# Obtener probabilidades de la clase "pion"
+prob_qda <- prediccion_qda$posterior[,2]
+# Calcula la curva ROC
+roc_curve <- roc(test$PDGcode, prob_qda)
+auc_value <- auc(roc_curve)
+# Graficar la curva ROCplot(roc_curve, 
+ggplot(data = data.frame(TPR = roc_curve$sensitivities, 
+                         FPR = 1 - roc_curve$specificities), 
+       aes(x = FPR, y = TPR)) +
+  geom_line(color = "blue", size = 1) +
+  geom_abline(linetype = "dashed", color = "red") + # Línea de referencia diagonal
+  labs(title = "ROC Curve - QDA",
+       x = "False Positive Rate (1 - Specificity)",
+       y = "True Positive Rate (Sensitivity)") +
+  theme_minimal()+
+   annotate("text", x = 0.8, y = 0.2, label = paste0("AUC = ",round(auc_value,4)), color = "blue", vjust = 1.5) 
+
+```
+
+Ahora sigo con el logit con todas las variables.
+```{r}
+#Descomentar si interesase estudiar la probabilidad de que sea pion, poniendo de referencia la clase muon
+# train$PDGcode <- relevel(train$PDGcode, ref = "muon")
+# test$PDGcode <- relevel(test$PDGcode, ref = "muon")
+model_logit <- glm(PDGcode ~ (nopflash + meanhitrisetime + maxhitamp + maxhitarea + maxhitwidth + meanhitamp), family = binomial(link = "logit"), data = train[,-c(1)])
+
+
+
+#Como el segundo nivel es muon, se ve que al hacer el modelo glm(), la prob que asocia es respecto al segundo nivel.
+
+prob_logit <- predict(model_logit, test, type = "response")
+prediccion_logit <- ifelse(prob_logit >= 0.5, "muon", "pion")
+prediccion_logit <- factor(prediccion_logit, levels = levels(test$PDGcode))
+
+
+(mat_confusion <- confusionMatrix(prediccion_logit,test$PDGcode))
+prop.table(mat_confusion$table)*100
+mat_confusion$byClass
+paste0("Eficiencia x Pureza de: ", mat_confusion$byClass["Sensitivity"]*mat_confusion$byClass["Specificity"])
+
+# Crear el objeto ROC
+roc_curve <- roc(response = test$PDGcode, predictor = prob_logit, levels = levels(test$PDGcode))
+auc_value <- auc(roc_curve)
+print(paste("AUC:", auc_value))
+# Graficar la curva ROC con ggplot2
+ggplot(data = data.frame(TPR = roc_curve$sensitivities, 
+                         FPR = 1 - roc_curve$specificities), 
+       aes(x = FPR, y = TPR)) +
+  geom_line(color = "blue", size = 1) +
+  geom_abline(linetype = "dashed", color = "red") + # Línea de referencia diagonal
+  labs(title = "ROC Curve - Logistic Regression",
+       x = "False Positive Rate (1 - Specificity)",
+       y = "True Positive Rate (Sensitivity)") +
+  theme_minimal()+
+     annotate("text", x = 0.8, y = 0.2, label = paste0("AUC = ",round(auc_value,4)), color = "blue", vjust = 1.5) 
+
+# Calcular y mostrar el AUC
+
+```
+## Logit pero con menos variables!
+Voy ahora a hacer logit pero con menos variables, a ver qué sale
+
+```{r}
+#HE VISTO QUE QUITANDO MAXHITWIDTH EL MODELO MEJORA!!!!!
+#Y ADEMAS COMO HAY QUE QUITAR MEANHITRISETIME PORQUE NO ES SIGNIFICATIVO!
+#El modelo completo quedaría MEJOR con esto, con un AUC del 0.715
+model_logit <- glm(PDGcode ~ (nopflash  + maxhitamp + maxhitarea + meanhitamp), family = binomial(link = "logit"), data = train[,-c(1)])
+
+levels(test$PDGcode)
+model_logit
+#Como el segundo nivel es muon, se ve que al hacer el modelo glm(), la prob que asocia es respecto al segundo nivel.
+
+prob_logit <- predict(model_logit, test, type = "response")
+prediccion_logit <- ifelse(prob_logit >= 0.5, "muon", "pion")
+prediccion_logit <- factor(prediccion_logit, levels = levels(test$PDGcode))
+
+#Parece que poner de threshold el 0.6 es la mejor opción, y cuadra bastante mas con la curva ROC
+
+
+
+(mat_confusion <- confusionMatrix(prediccion_logit,test$PDGcode))
+prop.table(mat_confusion$table)*100
+mat_confusion$byClass
+paste0("Eficiencia x Pureza de: ", mat_confusion$byClass["Sensitivity"]*mat_confusion$byClass["Specificity"])
+
+
+probabilidades <- seq(0,1, by = 0.05)
+auxiliar <- vector( length = length(probabilidades))
+auxiliar_2 <- vector( length = length(probabilidades))
+for(i in probabilidades){
+  
+prob_logit <- predict(model_logit, test, type = "response")
+prediccion_logit <- ifelse(prob_logit >= i, "muon", "pion")
+prediccion_logit <- factor(prediccion_logit, levels = levels(test$PDGcode))
+
+mat_confusion <- confusionMatrix(prediccion_logit,test$PDGcode)
+auxiliar[i*20] <- mat_confusion$byClass["Sensitivity"]
+auxiliar_2[i*20] <- mat_confusion$byClass["Specificity"]
+}
+plot(probabilidades, y =auxiliar, main="Eficiencia * pureza", col = "red", pch = 19)
+points(probabilidades, y = auxiliar_2,col = "blue", pch = 19)
+legend("topleft", legend = c("Eficiencia", "Pureza"), col = c("red","blue"))
+
+roc_curve <- roc(response = test$PDGcode, predictor = prob_logit, levels = levels(test$PDGcode))
+auc_value <- auc(roc_curve)
+print(paste("AUC:", auc_value))
+# Graficar la curva ROC con ggplot2
+ggplot(data = data.frame(TPR = roc_curve$sensitivities, 
+                         FPR = 1 - roc_curve$specificities), 
+       aes(x = FPR, y = TPR)) +
+  geom_line(color = "blue", size = 1) +
+  geom_abline(linetype = "dashed", color = "red") + # Línea de referencia diagonal
+  labs(title = "ROC Curve - Logistic Regression",
+       x = "False Positive Rate (1 - Specificity)",
+       y = "True Positive Rate (Sensitivity)") +
+  theme_minimal()+
+     annotate("text", x = 0.8, y = 0.2, label = paste0("AUC = ",round(auc_value,4)), color = "blue", vjust = 1.5) 
+
+```
+
+
+Ahora voy a ver solo con nopflash y la ROC
+
+```{r}
+#El AUC de esto es de 0.6, bastante malo, pero esta es interesante para la pureza
+model_logit <- glm(PDGcode ~ (nopflash ), family = binomial(link = "logit"), data = train[,-c(1)])
+
+levels(test$PDGcode)
+
+#Como el segundo nivel es muon, se ve que al hacer el modelo glm(), la prob que asocia es respecto al segundo nivel.
+
+prob_logit <- predict(model_logit, test, type = "response")
+prediccion_logit <- ifelse(prob_logit >= 0.5, "muon", "pion")
+prediccion_logit <- factor(prediccion_logit, levels = levels(test$PDGcode))
+
+#Parece que poner de threshold el 0.6 es la mejor opción, y cuadra bastante mas con la curva ROC
+
+
+
+(mat_confusion <- confusionMatrix(prediccion_logit,test$PDGcode))
+prop.table(mat_confusion$table)*100
+mat_confusion$byClass
+paste0("Eficiencia x Pureza de: ", mat_confusion$byClass["Sensitivity"]*mat_confusion$byClass["Specificity"])
+
+roc_curve <- roc(response = test$PDGcode, predictor = prob_logit, levels = levels(test$PDGcode))
+auc_value <- auc(roc_curve)
+print(paste("AUC:", auc_value))
+# Graficar la curva ROC con ggplot2
+ggplot(data = data.frame(TPR = roc_curve$sensitivities, 
+                         FPR = 1 - roc_curve$specificities), 
+       aes(x = FPR, y = TPR)) +
+  geom_line(color = "blue", size = 1) +
+  geom_abline(linetype = "dashed", color = "red") + # Línea de referencia diagonal
+  labs(title = "ROC Curve - Logistic Regression",
+       x = "False Positive Rate (1 - Specificity)",
+       y = "True Positive Rate (Sensitivity)") +
+  theme_minimal()+
+     annotate("text", x = 0.8, y = 0.2, label = paste0("AUC = ",round(auc_value,4)), color = "blue", vjust = 1.5) 
+
+
+
+```
+
+Por último, voy solo a trastocar a ver qué combinaciones me interesan
+
+
+
+AHORA REPETIR ESTOS DOS MODELOS PERO QUITANDO NOPFLASH PARA MAYOR DE 3
+
+```{r}
+train_2 <- train[train$nopflash <=2,]
+test_2 <- test[test$nopflash <=2,]
+
+summary(train_2)
+```
+
+Aplico QDA 
+
+```{r}
+#Quitando maxhitwidth me da mejores resultados
+model_qda <- qda(PDGcode ~ ., data = train_2[,-c(1,7)])
+
+prediccion_qda <- predict(model_qda, test_2)
+
+prediccion_qda_mod <- ifelse(prediccion_qda$posterior[, "muon"] >= 0.5, "muon", "pion")
+
+# Convertir a factor con los niveles correctos
+prediccion_qda_mod <- factor(prediccion_qda_mod, levels = levels(test_2$PDGcode))
+
+# Matriz de confusión
+(mat_confusion <- confusionMatrix(prediccion_qda_mod, test_2$PDGcode))
+prop.table(mat_confusion$table)*100
+mat_confusion$byClass
+paste0("Eficiencia x Pureza de: ", mat_confusion$byClass["Sensitivity"]*mat_confusion$byClass["Specificity"])
+
+```
+```{r}
+
+# Obtener probabilidades de la clase "pion"
+prob_qda <- prediccion_qda$posterior[,2]
+# Calcula la curva ROC
+roc_curve <- roc(test_2$PDGcode, prob_qda)
+auc(roc_curve)
+# Graficar la curva ROCplot(roc_curve, 
+ggplot(data = data.frame(TPR = roc_curve$sensitivities, 
+                         FPR = 1 - roc_curve$specificities), 
+       aes(x = FPR, y = TPR)) +
+  geom_line(color = "blue", size = 1) +
+  geom_abline(linetype = "dashed", color = "red") + # Línea de referencia diagonal
+  labs(title = "ROC Curve - QDA",
+       x = "False Positive Rate (1 - Specificity)",
+       y = "True Positive Rate (Sensitivity)") +
+  theme_minimal()+
+       annotate("text", x = 0.8, y = 0.2, label = paste0("AUC = ",round(auc_value,4)), color = "blue", vjust = 1.5) 
+
+
+```
+Y ahora sigo con logit para nopflash <=2
+```{r}
+model_logit <- glm(PDGcode ~ (nopflash + meanhitrisetime + maxhitamp + maxhitarea + maxhitwidth + meanhitamp), family = binomial(link = "logit"), data = train_2[,-c(1)])
+
+levels(test_2$PDGcode)
+
+#Como el segundo nivel es muon, se ve que al hacer el modelo glm(), la prob que asocia es respecto al segundo nivel.
+
+prob_logit <- predict(model_logit, test_2, type = "response")
+prediccion_logit <- ifelse(prob_logit >= 0.5, "muon", "pion")
+prediccion_logit <- factor(prediccion_logit, levels = levels(test_2$PDGcode))
+
+#Parece que poner de threshold el 0.6 es la mejor opción, y cuadra bastante mas con la curva ROC
+
+
+
+(mat_confusion <- confusionMatrix(prediccion_logit,test_2$PDGcode))
+prop.table(mat_confusion$table)*100
+mat_confusion$byClass
+paste0("Eficiencia x Pureza de: ", mat_confusion$byClass["Sensitivity"]*mat_confusion$byClass["Specificity"])
+
+```
+
+Curva ROC logit
+
+```{r}
+# Obtener probabilidades de la clase "pion"
+
+auc_value <- auc(roc_curve)
+print(paste("AUC:", auc_value))
+
+# Crear el objeto ROC
+roc_curve <- roc(response = test_2$PDGcode, predictor = prob_logit, levels = levels(test_2$PDGcode))
+
+# Graficar la curva ROC con ggplot2
+ggplot(data = data.frame(TPR = roc_curve$sensitivities, 
+                         FPR = 1 - roc_curve$specificities), 
+       aes(x = FPR, y = TPR)) +
+  geom_line(color = "blue", size = 1) +
+  geom_abline(linetype = "dashed", color = "red") + # Línea de referencia diagonal
+  labs(title = "ROC Curve - Logistic Regression",
+       x = "False Positive Rate (1 - Specificity)",
+       y = "True Positive Rate (Sensitivity)") +
+  theme_minimal()+
+       annotate("text", x = 0.8, y = 0.2, label = paste0("AUC = ",round(auc_value,4)), color = "blue", vjust = 1.5) 
+
+# Calcular y mostrar el AUC
+
+```
+
+Y por ultimo para probar con las variables
+```{r}
+#HE VISTO QUE QUITANDO MAXHITWIDTH EL MODELO MEJORA!!!!!
+#Y ADEMAS COMO HAY QUE QUITAR MEANHITRISETIME PORQUE NO ES SIGNIFICATIVO!
+#El modelo completo quedaría MEJOR con esto, con un AUC del 0.715
+model_logit <- glm(PDGcode ~ (nopflash  + maxhitamp + maxhitarea + meanhitamp), family = binomial(link = "logit"), data = train_2[,-c(1)])
+
+levels(test_2$PDGcode)
+
+#Como el segundo nivel es muon, se ve que al hacer el modelo glm(), la prob que asocia es respecto al segundo nivel.
+
+
+#PLOTEO LOS GRAFICOS DE EF*PUR PARA VER SI EL MEJOR PUNTO ES 0.5
+
+probabilidades <- seq(0,1, by = 0.05)
+auxiliar <- vector( length = length(probabilidades))
+auxiliar_2 <- vector( length = length(probabilidades))
+for(i in probabilidades){
+  
+prob_logit <- predict(model_logit, test_2, type = "response")
+prediccion_logit <- ifelse(prob_logit >= i, "muon", "pion")
+prediccion_logit <- factor(prediccion_logit, levels = levels(test_2$PDGcode))
+
+mat_confusion <- confusionMatrix(prediccion_logit,test_2$PDGcode)
+auxiliar[i*20] <- mat_confusion$byClass["Sensitivity"]
+auxiliar_2[i*20] <- mat_confusion$byClass["Specificity"]
+}
+plot(probabilidades, y =auxiliar, main="Eficiencia * pureza", col = "red", pch = 19)
+points(probabilidades, y = auxiliar_2,col = "blue", pch = 19)
+legend("topleft", legend = c("Eficiencia", "Pureza"), col = c("red","blue"))
+
+
+
+prob_logit <- predict(model_logit, test_2, type = "response")
+prediccion_logit <- ifelse(prob_logit >= 0.5, "muon", "pion")
+prediccion_logit <- factor(prediccion_logit, levels = levels(test_2$PDGcode))
+
+#Parece que poner de threshold el 0.6 es la mejor opción, y cuadra bastante mas con la curva ROC
+
+
+(mat_confusion <- confusionMatrix(prediccion_logit,test_2$PDGcode))
+
+prop.table(mat_confusion$table)*100
+mat_confusion$byClass
+paste0("Eficiencia x Pureza de: ", mat_confusion$byClass["Sensitivity"]*mat_confusion$byClass["Specificity"])
+
+
+# Obtener probabilidades de la clase "pion"
+
+auc_value <- auc(roc_curve)
+print(paste("AUC:", auc_value))
+
+# Crear el objeto ROC
+roc_curve <- roc(response = test_2$PDGcode, predictor = prob_logit, levels = levels(test_2$PDGcode))
+
+# Graficar la curva ROC con ggplot2
+ggplot(data = data.frame(TPR = roc_curve$sensitivities, 
+                         FPR = 1 - roc_curve$specificities), 
+       aes(x = FPR, y = TPR)) +
+  geom_line(color = "blue", size = 1) +
+  geom_abline(linetype = "dashed", color = "red") + # Línea de referencia diagonal
+  labs(title = "ROC Curve - Logistic Regression",
+       x = "False Positive Rate (1 - Specificity)",
+       y = "True Positive Rate (Sensitivity)") +
+  theme_minimal()+
+       annotate("text", x = 0.8, y = 0.2, label = paste0("AUC = ",round(auc_value,4)), color = "blue", vjust = 1.5) 
+
+# Calcular y mostrar el AUC
+
+
+
+```
+
+UNA VEZ VISTA LA EFICIENCIA POR PUREZA DE TODOS, NOS QUEDAMOS FINALMENTE CON EL 0.5, PUESTO QUE NO CAMBIA LA COSA NADA
+
+por otra parte, concluyo que sale todo mejor al quedarnos con las 4 variables, en vez de las 6.
