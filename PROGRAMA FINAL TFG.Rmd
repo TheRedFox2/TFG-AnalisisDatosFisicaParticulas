@@ -216,6 +216,7 @@ Esta es una de las cosas de la que quiero hablar al principio.
 Ahora SÍ meto los data frame nuevos
 ```{r}
 variables<-scan("variables.txt", what="", sep="\n")
+va <- c("nopflash","maxhitamp","maxhitarea","meanhitrisetime")
 datos <- datos[,c("EventID","PDGcode",variables)]
 train<-datos[datos$EventID>=1 & datos$EventID<=14,]
 test<-datos[datos$EventID>14,]
@@ -224,7 +225,7 @@ datos <- read.csv("datos_mezclados.csv")
 colores <- c(rgb(248, 118, 109, maxColorValue = 255),rgb(97, 156, 255, maxColorValue = 255)) 
 datos$color <- colores[as.numeric(factor(datos$PDGcode))]
 par(xpd = TRUE)
-pairs(datos[, c(variables,"maxhitPE")], col = datos$color, pch = 1,cex = 0.8)
+pairs(datos[, c(va,"maxhitPE")], col = datos$color, pch = 1,cex = 0.8)
 legend("top", inset = -0.1,legend = c("Muon", "Pion"),  fill = colores, pch = 1,horiz = TRUE,title = "PDGcode",cex=0.5)
 datos <- datos[, !(names(datos) %in% "color")]
 ```
@@ -457,7 +458,7 @@ mc$table
 cat("Y ahora las proporciones  \n")
 round(prop.table(mc$table)*100,2)
 mc$byClass
-paste0("Eficiencia x Pureza de: ", mc$byClass["Sensitivity"]*mc$byClass["Specificity"])
+paste0("Eficiencia x Pureza de: ", mc$byClass["Sensitivity"]*mc$byClass["Precision"])
 ```
 
 Por ultimo, la curva ROC del KNN
@@ -524,7 +525,7 @@ prediccion_qda_mod <- factor(prediccion_qda_mod, levels = levels(test$PDGcode))
 (mat_confusion <- confusionMatrix(prediccion_qda_mod, test$PDGcode))
 prop.table(mat_confusion$table)*100
 mat_confusion$byClass
-paste0("Eficiencia x Pureza de: ", mat_confusion$byClass["Sensitivity"]*mat_confusion$byClass["Specificity"])
+paste0("Eficiencia x Pureza de: ", mat_confusion$byClass["Sensitivity"]*mat_confusion$byClass["Precision"])
 
 # Y la curva ROC
 # Obtener probabilidades de la clase "pion"
@@ -565,7 +566,7 @@ prediccion_logit <- factor(prediccion_logit, levels = levels(test$PDGcode))
 (mat_confusion <- confusionMatrix(prediccion_logit,test$PDGcode))
 prop.table(mat_confusion$table)*100
 mat_confusion$byClass
-paste0("Eficiencia x Pureza de: ", mat_confusion$byClass["Sensitivity"]*mat_confusion$byClass["Specificity"])
+paste0("Eficiencia x Pureza de: ", mat_confusion$byClass["Sensitivity"]*mat_confusion$byClass["Precision"])
 
 # Crear el objeto ROC
 roc_curve <- roc(response = test$PDGcode, predictor = prob_logit, levels = levels(test$PDGcode))
@@ -610,7 +611,7 @@ prediccion_logit <- factor(prediccion_logit, levels = levels(test$PDGcode))
 (mat_confusion <- confusionMatrix(prediccion_logit,test$PDGcode))
 prop.table(mat_confusion$table)*100
 mat_confusion$byClass
-paste0("Eficiencia x Pureza de: ", mat_confusion$byClass["Sensitivity"]*mat_confusion$byClass["Specificity"])
+paste0("Eficiencia x Pureza de: ", mat_confusion$byClass["Sensitivity"]*mat_confusion$byClass["Precision"])
 
 
 probabilidades <- seq(0,1, by = 0.05)
@@ -624,7 +625,7 @@ prediccion_logit <- factor(prediccion_logit, levels = levels(test$PDGcode))
 
 mat_confusion <- confusionMatrix(prediccion_logit,test$PDGcode)
 auxiliar[i*20] <- mat_confusion$byClass["Sensitivity"]
-auxiliar_2[i*20] <- mat_confusion$byClass["Specificity"]
+auxiliar_2[i*20] <- mat_confusion$byClass["Precision"]
 }
 plot(probabilidades, y =auxiliar, main="Eficiencia * pureza", col = "red", pch = 19)
 points(probabilidades, y = auxiliar_2,col = "blue", pch = 19)
@@ -669,7 +670,7 @@ prediccion_logit <- factor(prediccion_logit, levels = levels(test$PDGcode))
 (mat_confusion <- confusionMatrix(prediccion_logit,test$PDGcode))
 prop.table(mat_confusion$table)*100
 mat_confusion$byClass
-paste0("Eficiencia x Pureza de: ", mat_confusion$byClass["Sensitivity"]*mat_confusion$byClass["Specificity"])
+paste0("Eficiencia x Pureza de: ", mat_confusion$byClass["Sensitivity"]*mat_confusion$byClass["Precision"])
 
 roc_curve <- roc(response = test$PDGcode, predictor = prob_logit, levels = levels(test$PDGcode))
 auc_value <- auc(roc_curve)
@@ -720,7 +721,7 @@ prediccion_qda_mod <- factor(prediccion_qda_mod, levels = levels(test_2$PDGcode)
 (mat_confusion <- confusionMatrix(prediccion_qda_mod, test_2$PDGcode))
 prop.table(mat_confusion$table)*100
 mat_confusion$byClass
-paste0("Eficiencia x Pureza de: ", mat_confusion$byClass["Sensitivity"]*mat_confusion$byClass["Specificity"])
+paste0("Eficiencia x Pureza de: ", mat_confusion$byClass["Sensitivity"]*mat_confusion$byClass["Precision"])
 
 ```
 ```{r}
@@ -763,7 +764,7 @@ prediccion_logit <- factor(prediccion_logit, levels = levels(test_2$PDGcode))
 (mat_confusion <- confusionMatrix(prediccion_logit,test_2$PDGcode))
 prop.table(mat_confusion$table)*100
 mat_confusion$byClass
-paste0("Eficiencia x Pureza de: ", mat_confusion$byClass["Sensitivity"]*mat_confusion$byClass["Specificity"])
+paste0("Eficiencia x Pureza de: ", mat_confusion$byClass["Sensitivity"]*mat_confusion$byClass["Precision"])
 
 ```
 
@@ -819,7 +820,7 @@ prediccion_logit <- factor(prediccion_logit, levels = levels(test_2$PDGcode))
 
 mat_confusion <- confusionMatrix(prediccion_logit,test_2$PDGcode)
 auxiliar[i*20] <- mat_confusion$byClass["Sensitivity"]
-auxiliar_2[i*20] <- mat_confusion$byClass["Specificity"]
+auxiliar_2[i*20] <- mat_confusion$byClass["Precision"]
 }
 plot(probabilidades, y =auxiliar, main="Eficiencia * pureza", col = "red", pch = 19)
 points(probabilidades, y = auxiliar_2,col = "blue", pch = 19)
@@ -838,7 +839,7 @@ prediccion_logit <- factor(prediccion_logit, levels = levels(test_2$PDGcode))
 
 prop.table(mat_confusion$table)*100
 mat_confusion$byClass
-paste0("Eficiencia x Pureza de: ", mat_confusion$byClass["Sensitivity"]*mat_confusion$byClass["Specificity"])
+paste0("Eficiencia x Pureza de: ", mat_confusion$byClass["Sensitivity"]*mat_confusion$byClass["Precision"])
 
 
 # Obtener probabilidades de la clase "pion"
